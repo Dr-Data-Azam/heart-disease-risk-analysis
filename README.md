@@ -54,5 +54,10 @@ reproducible R Markdown report.
   reverse causality or unmeasured confounding
 - Cholesterol variables did not associate significantly with outcome — possibly due to
   variable encoding or sample limitations
-- Logistic model AIC: 10,022; future work could explore interaction terms or
-  regularized regression
+- Future work could explore interaction terms, variable transformations, or LASSO
+  regularization to improve predictive performance
+
+## Rendered Report
+
+> Knit `heart_disease_analysis.Rmd` in RStudio to generate the full report with
+> all tables, visualizations, and statistical output in HTML, PDF, or Word format.
