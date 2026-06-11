@@ -59,7 +59,7 @@ reproducible R Markdown report.
 
 ## Rendered Report
 
-**[View the full rendered report here](https://htmlpreview.github.io/?https://github.com/Dr-Data-Azam/heart-disease-risk-analysis/blob/main/heart_disease_analysis.html)**
+**[View the full rendered report here](https://dr-data-azam.github.io/heart-disease-risk-analysis/heart_disease_analysis.html)**
 
 The link above opens the complete report — all tables, visualizations, and statistical
 output — directly in the browser. No R installation required.
