@@ -1,0 +1,36 @@
+# R environment files
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# R Markdown auto-generated output folders
+*_files/
+*_cache/
+
+# Generated output documents (source .Rmd is the source of truth)
+*.docx
+*.pdf
+*.html
+
+# Draft and working files — not part of the final portfolio
+1.Rmd
+2.Rmd
+3.Rmd
+4.Rmd
+5.Rmd
+"FINAL PROJECT_2ND ATTEMPT.Rmd"
+"Project Stats 1.Rmd"
+"Project Stats draft 0.Rmd"
+"week-13 appld-1.Rmd"
+smoking
+annotated-*.pdf
+"Project Proposal*"
+"Project Report*"
+"Group 3*"
+"3_STAT518*"
+"FINAL PPT*"
+
+# OS files
+.DS_Store
+Thumbs.db

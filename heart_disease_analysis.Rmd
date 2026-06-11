@@ -1,0 +1,374 @@
+---
+title: "Heart Disease Risk Analysis: Cholesterol Profiles and Lifestyle Factors"
+author: "Sheikh Azam Uddin"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    df_print: kable
+  word_document:
+    toc: true
+  pdf_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+library(broom)
+library(knitr)
+```
+
+# 1. Introduction
+
+## 1.1 Problem Statement
+
+Heart disease remains a leading cause of death globally, and its early detection is vital.
+Understanding how cholesterol levels — specifically total cholesterol, LDL (low-density
+lipoprotein), and HDL (high-density lipoprotein) — along with factors such as blood
+pressure, smoking, and physical activity contribute to heart disease risk is crucial for
+prevention strategies.
+
+## 1.2 Research Question
+
+To what extent do serum cholesterol profiles (total cholesterol, LDL, and HDL levels)
+independently predict heart disease risk, when also considering blood pressure, smoking,
+and physical activity?
+
+## 1.3 Statistical Approach
+
+Logistic regression and hypothesis testing (chi-square tests and a two-sample t-test) are
+used to identify and quantify associations between cholesterol profiles, lifestyle factors,
+and heart disease status. The logistic regression model estimates each predictor's
+contribution while holding the remaining covariates constant.
+
+## 1.4 Dataset
+
+The dataset is sourced from Kaggle and comprises 10,000 patient records, covering
+cardiovascular biomarkers (blood pressure, cholesterol, triglycerides) alongside
+self-reported lifestyle behaviors (smoking, exercise habits) and clinical diagnoses
+(hypertension, HDL/LDL classifications).
+
+**Outcome variable:** `Heart.Disease.Status` — Categorical (Yes / No)
+
+**Predictors used in this analysis:**
+
+| Variable | Type | Description |
+|---|---|---|
+| `Blood.Pressure` | Numerical | Systolic blood pressure |
+| `Cholesterol.Level` | Numerical | Total serum cholesterol |
+| `Triglyceride.Level` | Numerical | Serum triglyceride level |
+| `High.Blood.Pressure` | Categorical | Clinical hypertension (Yes / No) |
+| `Exercise.Habits` | Categorical | Physical activity level (High / Medium / Low) |
+| `Smoking` | Categorical | Current smoker (Yes / No) |
+| `Low.HDL.Cholesterol` | Categorical | Low HDL flag (Yes / No) |
+| `High.LDL.Cholesterol` | Categorical | High LDL flag (Yes / No) |
+
+---
+
+# 2. Data Loading and Preparation
+
+## 2.1 Load Data
+
+```{r load-data}
+heart_data <- read.csv("heart_disease.csv")
+cat("Dataset dimensions:", nrow(heart_data), "rows x", ncol(heart_data), "columns\n")
+kable(head(heart_data[, 1:8]), caption = "First 6 rows (first 8 columns shown)")
+```
+
+## 2.2 Variable Selection and Outcome Encoding
+
+```{r select-variables}
+names(heart_data) <- make.names(names(heart_data))
+
+num_vars <- c("Blood.Pressure", "Cholesterol.Level", "Triglyceride.Level")
+cat_vars <- c("High.Blood.Pressure", "Exercise.Habits", "Smoking",
+              "Low.HDL.Cholesterol", "High.LDL.Cholesterol")
+
+heart_data <- heart_data %>%
+  select(all_of(num_vars), all_of(cat_vars), Heart.Disease.Status) %>%
+  filter(Heart.Disease.Status %in% c("Yes", "No")) %>%
+  mutate(Heart.Disease.Status = factor(Heart.Disease.Status, levels = c("No", "Yes")))
+```
+
+## 2.3 Missing Value Imputation
+
+```{r impute}
+get_mode <- function(x) {
+  ux <- na.omit(unique(x))
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+heart_data[num_vars] <- lapply(heart_data[num_vars], function(x) {
+  ifelse(is.na(x), median(x, na.rm = TRUE), x)
+})
+
+heart_data[cat_vars] <- lapply(heart_data[cat_vars], function(x) {
+  x <- trimws(as.character(x))
+  x[x == ""] <- NA
+  x[is.na(x)] <- get_mode(x)
+  factor(x)
+})
+
+missing_check <- data.frame(
+  Variable = names(heart_data),
+  Missing  = colSums(is.na(heart_data)),
+  row.names = NULL
+)
+kable(missing_check, caption = "Missing value counts after imputation")
+```
+
+Numerical variables were imputed using their **median**; categorical variables were
+imputed using the **mode** (most frequent category).
+
+---
+
+# 3. Descriptive Statistics
+
+## 3.1 Numerical Variables
+
+```{r numerical-summary}
+num_summary <- data.frame(
+  Variable = c("Blood Pressure", "Cholesterol Level", "Triglyceride Level"),
+  N        = sapply(heart_data[, num_vars], function(x) sum(!is.na(x))),
+  Mean     = sapply(heart_data[, num_vars], function(x) round(mean(x),   2)),
+  Median   = sapply(heart_data[, num_vars], function(x) round(median(x), 2)),
+  SD       = sapply(heart_data[, num_vars], function(x) round(sd(x),     2)),
+  Min      = sapply(heart_data[, num_vars], function(x) round(min(x),    2)),
+  Max      = sapply(heart_data[, num_vars], function(x) round(max(x),    2)),
+  row.names = NULL
+)
+kable(num_summary, caption = "Summary statistics for numerical predictors")
+```
+
+## 3.2 Categorical Variables
+
+```{r categorical-summary}
+all_cat <- c(cat_vars, "Heart.Disease.Status")
+for (var in all_cat) {
+  freq_df <- as.data.frame(table(heart_data[[var]]))
+  names(freq_df) <- c("Category", "Count")
+  freq_df$Percentage <- paste0(round(prop.table(freq_df$Count) * 100, 1), "%")
+  print(kable(freq_df,
+              caption = paste("Distribution of:", gsub("\\.", " ", var)),
+              row.names = FALSE))
+}
+```
+
+---
+
+# 4. Data Visualization
+
+## 4.1 Categorical Predictors vs. Heart Disease Status
+
+```{r categorical-plots, fig.height=4}
+plot_labels <- c(
+  "High.Blood.Pressure"  = "High Blood Pressure",
+  "Low.HDL.Cholesterol"  = "Low HDL Cholesterol",
+  "High.LDL.Cholesterol" = "High LDL Cholesterol",
+  "Smoking"              = "Smoking Status",
+  "Exercise.Habits"      = "Exercise Habits"
+)
+
+for (var in names(plot_labels)) {
+  p <- ggplot(heart_data, aes(x = .data[[var]], fill = Heart.Disease.Status)) +
+    geom_bar(position = "dodge") +
+    scale_fill_manual(values = c("No" = "#2196F3", "Yes" = "#F44336")) +
+    theme_minimal() +
+    labs(
+      title = paste("Heart Disease by", plot_labels[[var]]),
+      x     = plot_labels[[var]],
+      y     = "Number of Individuals",
+      fill  = "Heart Disease"
+    )
+  print(p)
+}
+```
+
+## 4.2 Numerical Predictors vs. Heart Disease Status
+
+```{r boxplots, fig.height=4}
+box_labels <- c(
+  "Blood.Pressure"     = "Blood Pressure",
+  "Cholesterol.Level"  = "Cholesterol Level",
+  "Triglyceride.Level" = "Triglyceride Level"
+)
+
+for (var in names(box_labels)) {
+  p <- ggplot(heart_data,
+              aes(x = Heart.Disease.Status, y = .data[[var]],
+                  fill = Heart.Disease.Status)) +
+    geom_boxplot(alpha = 0.7) +
+    scale_fill_manual(values = c("No" = "#2196F3", "Yes" = "#F44336")) +
+    theme_minimal() +
+    theme(legend.position = "none") +
+    labs(
+      title = paste(box_labels[[var]], "by Heart Disease Status"),
+      x     = "Heart Disease Status",
+      y     = box_labels[[var]]
+    )
+  print(p)
+}
+```
+
+## 4.3 Correlation Heatmap
+
+```{r correlation-heatmap, fig.height=4, fig.width=5}
+numeric_cols <- names(heart_data)[sapply(heart_data, is.numeric)]
+cor_matrix   <- cor(heart_data[, numeric_cols], use = "complete.obs")
+cor_melted   <- melt(cor_matrix)
+
+ggplot(cor_melted, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(value, 2)), size = 3) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1, 1), name = "Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Correlation Heatmap of Numerical Variables", x = "", y = "")
+```
+
+---
+
+# 5. Statistical Analysis
+
+## 5.1 Chi-Square Test: Low HDL Cholesterol vs. Heart Disease
+
+```{r chisq-hdl}
+table_hdl <- table(heart_data$Low.HDL.Cholesterol, heart_data$Heart.Disease.Status)
+kable(as.data.frame.matrix(table_hdl),
+      caption = "Contingency table: Low HDL Cholesterol x Heart Disease Status")
+
+hdl_test <- chisq.test(table_hdl)
+
+kable(data.frame(
+  Statistic   = round(hdl_test$statistic, 3),
+  df          = hdl_test$parameter,
+  `p-value`   = round(hdl_test$p.value, 4),
+  check.names = FALSE
+), row.names = FALSE, caption = "Chi-Square Test Result: Low HDL Cholesterol")
+```
+
+## 5.2 Chi-Square Test: High LDL Cholesterol vs. Heart Disease
+
+```{r chisq-ldl}
+table_ldl <- table(heart_data$High.LDL.Cholesterol, heart_data$Heart.Disease.Status)
+kable(as.data.frame.matrix(table_ldl),
+      caption = "Contingency table: High LDL Cholesterol x Heart Disease Status")
+
+ldl_test <- chisq.test(table_ldl)
+
+kable(data.frame(
+  Statistic   = round(ldl_test$statistic, 3),
+  df          = ldl_test$parameter,
+  `p-value`   = round(ldl_test$p.value, 4),
+  check.names = FALSE
+), row.names = FALSE, caption = "Chi-Square Test Result: High LDL Cholesterol")
+```
+
+## 5.3 Welch Two-Sample t-Test: Cholesterol Level by Heart Disease Status
+
+```{r ttest-cholesterol}
+chol_ttest <- t.test(Cholesterol.Level ~ Heart.Disease.Status, data = heart_data)
+
+kable(data.frame(
+  `Mean (No)`   = round(chol_ttest$estimate[1], 2),
+  `Mean (Yes)`  = round(chol_ttest$estimate[2], 2),
+  `t-statistic` = round(chol_ttest$statistic, 3),
+  df            = round(chol_ttest$parameter, 1),
+  `p-value`     = round(chol_ttest$p.value, 4),
+  check.names   = FALSE
+), row.names = FALSE, caption = "Welch Two-Sample t-Test: Cholesterol Level by Heart Disease Status")
+```
+
+## 5.4 Logistic Regression Model
+
+```{r logistic-regression}
+logit_model <- glm(
+  Heart.Disease.Status ~ Cholesterol.Level + Low.HDL.Cholesterol +
+    High.LDL.Cholesterol + Blood.Pressure + Smoking + Exercise.Habits,
+  data   = heart_data,
+  family = "binomial"
+)
+
+kable(data.frame(
+  AIC                  = round(AIC(logit_model), 1),
+  `Null Deviance`      = round(logit_model$null.deviance, 1),
+  `Residual Deviance`  = round(logit_model$deviance, 1),
+  `Degrees of Freedom` = logit_model$df.residual,
+  check.names = FALSE
+), row.names = FALSE, caption = "Logistic Regression Model Fit Statistics")
+```
+
+## 5.5 Odds Ratios with 95% Confidence Intervals
+
+```{r odds-ratio-table}
+lr_results <- tidy(logit_model, exponentiate = TRUE, conf.int = TRUE) %>%
+  mutate(across(where(is.numeric), ~round(., 4))) %>%
+  rename(
+    Term         = term,
+    `Odds Ratio` = estimate,
+    SE           = std.error,
+    `z-value`    = statistic,
+    `p-value`    = p.value,
+    `CI Lower`   = conf.low,
+    `CI Upper`   = conf.high
+  )
+
+kable(lr_results, row.names = FALSE,
+      caption = "Logistic Regression: Odds Ratios with 95% Confidence Intervals")
+```
+
+```{r odds-ratio-plot, fig.height=5}
+odds_df <- tidy(logit_model, exponentiate = TRUE, conf.int = TRUE) %>%
+  filter(term != "(Intercept)")
+
+ggplot(odds_df, aes(x = reorder(term, estimate), y = estimate)) +
+  geom_point(size = 2.5) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.25) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red", alpha = 0.7) +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title    = "Odds Ratios with 95% Confidence Intervals",
+    subtitle = "Red dashed line indicates OR = 1 (no effect)",
+    x        = "Predictor",
+    y        = "Odds Ratio"
+  )
+```
+
+---
+
+# 6. Discussion
+
+Our analysis found that none of the predictor variables were statistically significant at the
+α = 0.05 level. The most notable observation was that individuals reporting any level of
+`Exercise.Habits` had borderline significant odds ratios (~6.0), potentially indicating a
+complex relationship with heart disease — possibly due to reverse causality or unmeasured
+confounders.
+
+Cholesterol-related variables (`Cholesterol.Level`, `Low.HDL.Cholesterol`,
+`High.LDL.Cholesterol`) showed no significant association with heart disease status, which
+is contrary to established clinical evidence. This may reflect limitations in the dataset's
+variable encoding, sampling strategy, or population representativeness.
+
+The logistic model had an AIC of `r round(AIC(logit_model), 0)`, suggesting modest model
+fit. Future analyses could explore interaction terms, variable transformations, or
+regularized regression (e.g., LASSO) to improve predictive performance and reduce
+overfitting risk.
+
+# 7. Conclusion
+
+This study examined how cholesterol profiles and lifestyle factors relate to heart disease
+risk in a dataset of 10,000 patients. While no predictor reached statistical significance
+at α = 0.05, the analysis revealed patterns in exercise behavior and cholesterol markers
+that warrant further investigation with larger, more clinically representative datasets.
+
+The full pipeline — from raw data ingestion and missing value imputation, through
+hypothesis testing and logistic regression, to publication-ready tables and visualizations
+— is implemented in a single reproducible R Markdown document, allowing results to be
+refreshed immediately whenever the underlying data are updated.
