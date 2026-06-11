@@ -12,6 +12,8 @@
 *.docx
 *.pdf
 *.html
+# Allow the rendered portfolio report
+!heart_disease_analysis.html
 
 # Draft and working files — not part of the final portfolio
 1.Rmd
